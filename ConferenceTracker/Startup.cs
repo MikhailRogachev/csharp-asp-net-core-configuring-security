@@ -8,12 +8,26 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using System;
+using Microsoft.Extensions.Logging;
 
 namespace ConferenceTracker
 {
+
+    /*
+     * Create a "Password" secret Note: because they're a secret only stored on your local computer, 
+     * we can't actually check to see if you did it right!
+     * We're going to use the .NET Core CLI (Command Line Interface).
+     * In the CLI navigate to the ConferenceTracker directory, not the solution's directory. 
+     * (You can use the cd command to navigate between directories. Example: cd ConferenceTracker)
+     * Enter the command dotnet user-secrets init this sets the secretsId for your project
+     * Enter the command dotnet user-secrets set "SecretMessage" "Keep it secret, Keep it safe." 
+     * this sets a secret with the key "SecretMessage" with a value "Keep it secret, Keep it safe."
+     */
     public class Startup
     {
+        // This field has been added to provide CORS functionality
+        private readonly string _allowedOrigins = "_allowedOrigins";
+
         public Startup(IConfiguration configuration)
         {
             Configuration = configuration;
@@ -26,22 +40,63 @@ namespace ConferenceTracker
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
+            // define secret message
+            SecretMessage = Configuration["SecretMessage"];
+
             services.AddDbContext<ApplicationDbContext>(options => options.UseInMemoryDatabase("ConferenceTracker"));
             services.AddDefaultIdentity<IdentityUser>(options => options.SignIn.RequireConfirmedAccount = true)
                 .AddEntityFrameworkStores<ApplicationDbContext>();
+
+            // Add Cookie Policy to ConfigureServices
+            services.Configure<CookiePolicyOptions>(options =>
+            {
+                options.CheckConsentNeeded = context => true;
+                options.MinimumSameSitePolicy = SameSiteMode.None;
+            });
+
             services.AddControllersWithViews();
             services.AddRazorPages();
+
+            // adding of this structure is providing CORS supprot
+            services.AddCors(options =>
+            {
+                options.AddPolicy(_allowedOrigins, builder =>
+                {
+                    builder.WithOrigins("http://pluralsight.com");
+                });
+            });            
+
             services.AddTransient<IPresentationRepository, PresentationRepository>();
             services.AddTransient<ISpeakerRepository, SpeakerRepository>();
         }
 
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
-        {            
-            using (var scope = app.ApplicationServices.GetRequiredService<IServiceScopeFactory>().CreateScope())
-            using (var context = scope.ServiceProvider.GetService<ApplicationDbContext>())
-                context.Database.EnsureCreated();
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ILogger<Startup> logger)
+        {
+
+            if(env.IsDevelopment())
+            {
+                logger.LogInformation("Environment is in development");
+                app.UseDeveloperExceptionPage();
+                app.UseDatabaseErrorPage();
+            }
+            else
+            {
+                app.UseExceptionHandler("/Home/Error");
+                app.UseHsts();
+            }
+
+            ContextSeeder(app);
+
+            // to provide CORS functionality
+            app.UseCors(_allowedOrigins);
+
+            //ex 1-1 - provides HTTP requests to use HTTPS instead
+            app.UseHttpsRedirection();
+
+            // Add Cookie Policy to Configure
+            app.UseCookiePolicy();
 
             app.UseStaticFiles();
 
@@ -58,5 +113,13 @@ namespace ConferenceTracker
                 endpoints.MapRazorPages();
             });
         }
+
+        private void ContextSeeder(IApplicationBuilder app)
+        {
+            using (var scope = app.ApplicationServices.GetRequiredService<IServiceScopeFactory>().CreateScope())
+            using (var context = scope.ServiceProvider.GetService<ApplicationDbContext>())
+                context.Database.EnsureCreated();
+        }
     }
 }
+ 
